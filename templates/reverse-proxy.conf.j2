@@ -1,0 +1,156 @@
+# {{ ansible_managed }}
+
+upstream {{ item.backend_name }} {
+    {% if item.balancer_config is defined %}
+    {{ item.balancer_config }}
+    {% endif %}
+    {% for backend in item.backends %}
+    server {{ backend }};
+    {% endfor %}
+}
+{% if item.cache is defined %}
+{% if item.proxy_cache_path is defined %}
+proxy_cache_path {{ item.proxy_cache_path }} levels=1:2    keys_zone={{ item.backend_name }}:10m
+    inactive=72h  max_size=10g;
+{% endif %}{% endif %}
+
+map $cookie_XYZ $bypass {
+  '123' 0;
+  'default' true;
+}
+server {
+    listen 80;
+    server_name {{ item.domains|join(' ') }} *.{{ item.domains|join(' ') }};
+	client_max_body_size 4096M;
+		{% if item.cache is defined %}
+		proxy_cache {{ item.backend_name }};
+        proxy_cache_revalidate on;
+        proxy_cache_min_uses 1;
+        proxy_cache_use_stale error timeout updating http_500 http_502
+                              http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        proxy_cache_key $scheme$host$request_uri;
+		proxy_ignore_headers  X-Accel-Expires Expires;
+        proxy_cache_valid any 30m;
+		add_header X-Cache $upstream_cache_status;    
+		{% endif %}
+    location {{ item.location|default('/') }} {
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_pass         http://{{ item.backend_name }}/;
+	
+    }
+{% if item.subservers is defined %}
+{% for loc in item.subservers %}
+    location /{{ loc.location }}/ {
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_pass         http://{{ loc.beckend }}/;
+    }
+{% endfor %}
+{% endif %}
+	
+	{% if item.ssl is defined %}
+    {{ item.ssl }}
+    {% endif %}
+
+   
+
+}
+{% if item.ssl is defined %}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+	client_max_body_size 4096M;
+    server_name {{ item.domains|join(' ') }} *.{{ item.domains|join(' ') }};
+
+	{% if item.subservers is defined %}
+	{% for loc in item.subservers %}
+	location ~* "/{{ loc.location }}.+\.(ico|jpg|gif|jpeg|css|js|flv|png|swf)$" {	
+		{% if item.cache is defined %}
+		proxy_cache {{ item.backend_name }};
+		add_header X-Cache $upstream_cache_status;    
+        proxy_cache_revalidate on;
+        proxy_cache_min_uses 1;
+        proxy_cache_use_stale error timeout updating http_500 http_502
+                              http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        proxy_cache_key $scheme$host$request_uri;
+		proxy_ignore_headers  X-Accel-Expires Expires;
+        proxy_cache_valid any 30m;
+		proxy_cache_bypass $http_x_really_get_it; 
+		# curl --header "X-Really-Get-It: true" https://minecore.cz/minecraft-servery -I
+		{% endif %}
+		#rewrite {{ loc.location }} {{ loc.location }}/$1 break;
+		rewrite ^/{{ loc.location }}/(.*)$ /$1? break;
+		proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto https;
+        proxy_set_header      X-Forwarded-Port 443;
+        proxy_pass         http://{{ loc.beckend }};
+	}
+    location /{{ loc.location }}/ {
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto https;
+        proxy_set_header      X-Forwarded-Port 443;
+        proxy_pass         http://{{ loc.beckend }}/;
+    }
+	{% endfor %}
+	{% endif %}
+
+	#location  {{ item.location|default('/') }}.*(?:jpg|jpeg|gif|png|ico|cur|gz|svg|svgz|mp4|ogg|ogv|webm|htc)$ {
+	location ~* .+\.(ico|jpg|gif|jpeg|css|js|flv|png|swf)$ {	
+		{% if item.cache is defined %}
+		proxy_cache {{ item.backend_name }};
+		add_header X-Cache $upstream_cache_status;    
+        proxy_cache_revalidate on;
+        proxy_cache_min_uses 1;
+        proxy_cache_use_stale error timeout updating http_500 http_502
+                              http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        proxy_cache_key $scheme$host$request_uri;
+		proxy_ignore_headers  X-Accel-Expires Expires;
+        proxy_cache_valid any 30m;
+		proxy_cache_bypass $http_x_really_get_it; 
+		# curl --header "X-Really-Get-It: true" https://minecore.cz/minecraft-servery -I
+		{% endif %}
+		 proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto https;
+        proxy_set_header      X-Forwarded-Port 443;
+        proxy_pass         http://{{ item.backend_name }};
+	}
+    location {{ item.location|default('/') }} {
+	
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   Host      $http_host;
+        proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto https;
+        proxy_set_header      X-Forwarded-Port 443;
+        proxy_pass         http://{{ item.backend_name }}/;
+		
+    }
+
+
+ssl on;
+
+ssl_certificate  /etc/letsencrypt/live/storage/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/storage/privkey.pem;
+
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:20m;
+ssl_session_tickets off;
+
+ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+ssl_prefer_server_ciphers on;
+
+ssl_ciphers 'ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:DHE-RSA-AES256-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!MD5:!PSK'; 
+}
+ {% endif %}

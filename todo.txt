@@ -1,0 +1,2 @@
+nano /etc/nginx/nginx.conf
+fastcgi_read_timeout 300;
