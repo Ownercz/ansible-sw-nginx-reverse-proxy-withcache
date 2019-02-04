@@ -1,10 +1,11 @@
 ---
 - name: Cleanup of old config files
-  file: path=/etc/nginx/conf.d/ state=absent
-  
+  file: path=/etc/nginx/conf.d/
+    state: absent
+
 - name: Create config folder
   file: path=/etc/nginx/conf.d/ state=directory
-  
+
 - name: deploy reverse proxy configurations
   template:
     src: reverse-proxy.conf.j2
@@ -15,4 +16,3 @@
 
 - name: nginx service state
   service: name=nginx state=restarted enabled=yes
-    

@@ -8,6 +8,9 @@
     group: nginx
     mode: 0775
 
+- name: Install the nginx package
+  yum: name=nginx state=latest
+
 - include: deploy.yml
   tags: deploy
 - name: nginx service state
